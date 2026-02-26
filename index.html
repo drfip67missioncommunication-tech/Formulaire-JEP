@@ -218,25 +218,25 @@
         const form = document.getElementById('regForm');
         const messageDiv = document.getElementById('message');
 
+        let currentMappings = null;
+
         // Initialisation de l'API Grist
         grist.ready({
             requiredAccess: 'full',
-            // Définition explicite des colonnes attendues par le widget
             columns: [
-                { name: "Prenom", title: "Prénom", optional: false },
-                { name: "Nom", title: "Nom", optional: false },
-                { name: "Email", title: "Email", optional: false },
-                { name: "NbPersonnes", title: "NbPersonnes", optional: false },
-                { name: "Creneau", title: "Creneau", optional: false }
+                { name: "Prenom", title: "Prénom" },
+                { name: "Nom", title: "Nom" },
+                { name: "Email", title: "Email" },
+                { name: "NbPersonnes", title: "NbPersonnes" },
+                { name: "Creneau", title: "Creneau" }
             ]
         });
 
-        // Écouter les changements dans le tableur Grist pour mettre à jour les disponibilités
+        // Écouter les changements dans le tableur Grist
         grist.onRecords(function(records, mappings) {
-            console.log("Colonnes mappées par Grist :", mappings);
+            currentMappings = mappings; // On sauvegarde la "traduction" des colonnes
             slotTotals = {};
             records.forEach(r => {
-                // Utilisation du mapping pour lire les données même si les colonnes sont renommées
                 const slot = r.Creneau;
                 const count = parseInt(r.NbPersonnes) || 0;
                 if (slot) {
@@ -288,6 +288,11 @@
         form.onsubmit = async (e) => {
             e.preventDefault();
             
+            if (!currentMappings) {
+                messageDiv.innerHTML = '<span class="error">Erreur : Le mapping des colonnes n\'est pas prêt.</span>';
+                return;
+            }
+
             const peopleCount = parseInt(document.getElementById('peopleCount').value);
             const currentTotal = slotTotals[selectedSlot] || 0;
             
@@ -296,8 +301,8 @@
                 return;
             }
 
-            // Préparation de l'enregistrement
-            const record = {
+            // DONNÉES BRUTES
+            const rawData = {
                 Prenom: document.getElementById('firstName').value,
                 Nom: document.getElementById('lastName').value,
                 Email: document.getElementById('email').value,
@@ -305,22 +310,22 @@
                 Creneau: selectedSlot
             };
 
-            console.log("Tentative d'envoi du record :", record);
+            // TRADUCTION : On transforme les noms (Prenom, Nom...) en IDs réels (a, b, c...)
+            const mappedRecord = {};
+            for (const key in rawData) {
+                const realColId = currentMappings[key];
+                if (realColId) {
+                    mappedRecord[realColId] = rawData[key];
+                }
+            }
 
             try {
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                if (!window.grist) throw new Error("L'API Grist n'est pas chargée.");
-
-                // Utilisation de la méthode la plus fiable avec mapping automatique
-                if (grist.selectedTable) {
-                    // create() utilise automatiquement le mapping défini dans grist.ready()
-                    await grist.selectedTable.create([record]);
-                } else {
-                    const tableId = await grist.getTableId();
-                    await grist.docApi.addRecords(tableId, [record]);
-                }
+                // On utilise l'ID de la table et addRecords pour une précision maximale
+                const tableId = await grist.getTableId();
+                await grist.docApi.addRecords(tableId, [mappedRecord]);
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
                 form.reset();
@@ -329,7 +334,7 @@
                 validate();
             } catch (err) {
                 console.error("Grist Error Details:", err);
-                messageDiv.innerHTML = '<span class="error">Erreur technique : ' + (err.message || "Erreur de communication") + '</span>';
+                messageDiv.innerHTML = '<span class="error">Erreur : ' + (err.message || "Problème de communication") + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
