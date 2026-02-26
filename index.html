@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inscription Grist</title>
+    <!-- Grist Plugin API pour l'intégration avec le tableur -->
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <style>
+        :root {
+            --primary: #5A5A40;
+            --bg: #F5F5F0;
+            --text: #1a1a1a;
+            --error: #dc2626;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 500px;
+            border: 1px solid rgba(90, 90, 64, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 24px;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            box-sizing: border-box;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .slots-section {
+            margin-top: 25px;
+        }
+
+        .slots-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #aaa;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+
+        .slots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .slot-btn {
+            padding: 10px 5px;
+            border: 1px solid #eee;
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .slot-btn:hover:not(.full) {
+            border-color: var(--primary);
+            background: #fafafa;
+        }
+
+        .slot-btn.selected {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .slot-btn.full {
+            background: #f0f0f0;
+            color: #bbb;
+            cursor: not-allowed;
+            border-color: #eee;
+        }
+
+        .complet-tag {
+            color: var(--error);
+            font-style: italic;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: transform 0.1s, background 0.2s;
+        }
+
+        button[type="submit"]:hover:not(:disabled) {
+            background: #4A4A30;
+        }
+
+        button[type="submit"]:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        button[type="submit"]:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #message {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .success { color: #059669; }
+        .error { color: var(--error); }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Inscription</h1>
+        <form id="regForm">
+            <div class="form-group">
+                <label>Prénom</label>
+                <input type="text" id="firstName" required placeholder="Ex: Jean">
+            </div>
+            <div class="form-group">
+                <label>Nom</label>
+                <input type="text" id="lastName" required placeholder="Ex: Dupont">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" required placeholder="Ex: jean@mail.com">
+            </div>
+            <div class="form-group">
+                <label>Nombre de personnes</label>
+                <input type="number" id="peopleCount" min="1" max="15" value="1" required>
+            </div>
+            
+            <div class="slots-section">
+                <div class="slots-title">Matin (10h - 12h)</div>
+                <div id="morningSlots" class="slots-grid"></div>
+                
+                <div class="slots-title">Après-midi (14h - 16h)</div>
+                <div id="afternoonSlots" class="slots-grid"></div>
+            </div>
+
+            <button type="submit" id="submitBtn" disabled>S'INSCRIRE</button>
+        </form>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        const morningTimes = ["10:00", "10:15", "10:30", "10:45", "11:00", "11:15", "11:30", "11:45", "12:00"];
+        const afternoonTimes = ["14:00", "14:15", "14:30", "14:45", "15:00", "15:15", "15:30", "15:45", "16:00"];
+        
+        let selectedSlot = null;
+        let slotTotals = {}; // Stocke le total de personnes par créneau
+
+        const morningContainer = document.getElementById('morningSlots');
+        const afternoonContainer = document.getElementById('afternoonSlots');
+        const submitBtn = document.getElementById('submitBtn');
+        const form = document.getElementById('regForm');
+        const messageDiv = document.getElementById('message');
+
+        // Initialisation de l'API Grist
+        grist.ready({
+            requiredAccess: 'full',
+            // On s'attend à ce que le tableur ait ces colonnes
+            columns: ['Prenom', 'Nom', 'Email', 'NbPersonnes', 'Creneau']
+        });
+
+        // Écouter les changements dans le tableur Grist pour mettre à jour les disponibilités
+        grist.onRecords(function(records) {
+            slotTotals = {};
+            records.forEach(r => {
+                const slot = r.Creneau;
+                const count = parseInt(r.NbPersonnes) || 0;
+                if (slot) {
+                    slotTotals[slot] = (slotTotals[slot] || 0) + count;
+                }
+            });
+            renderAllSlots();
+        });
+
+        function renderAllSlots() {
+            renderSlotGroup(morningTimes, morningContainer);
+            renderSlotGroup(afternoonTimes, afternoonContainer);
+        }
+
+        function renderSlotGroup(times, container) {
+            container.innerHTML = '';
+            times.forEach(time => {
+                const total = slotTotals[time] || 0;
+                const isFull = total >= 15;
+                
+                const btn = document.createElement('div');
+                btn.className = 'slot-btn' + (isFull ? ' full' : '') + (selectedSlot === time ? ' selected' : '');
+                
+                const timeSpan = document.createElement('span');
+                timeSpan.innerText = time;
+                btn.appendChild(timeSpan);
+                
+                if (isFull) {
+                    const complet = document.createElement('span');
+                    complet.className = 'complet-tag';
+                    complet.innerText = '(complet)';
+                    btn.appendChild(complet);
+                } else {
+                    btn.onclick = () => {
+                        selectedSlot = time;
+                        renderAllSlots();
+                        validate();
+                    };
+                }
+                
+                container.appendChild(btn);
+            });
+        }
+
+        function validate() {
+            submitBtn.disabled = !selectedSlot;
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const peopleCount = parseInt(document.getElementById('peopleCount').value);
+            const currentTotal = slotTotals[selectedSlot] || 0;
+            
+            if (currentTotal + peopleCount > 15) {
+                messageDiv.innerHTML = '<span class="error">Désolé, il ne reste que ' + (15 - currentTotal) + ' places sur ce créneau.</span>';
+                return;
+            }
+
+            const record = {
+                Prenom: document.getElementById('firstName').value,
+                Nom: document.getElementById('lastName').value,
+                Email: document.getElementById('email').value,
+                NbPersonnes: peopleCount,
+                Creneau: selectedSlot
+            };
+
+            try {
+                submitBtn.disabled = true;
+                submitBtn.innerText = 'ENREGISTREMENT...';
+                
+                // Envoi vers Grist
+                await grist.selectedTable.createRecords([record]);
+                
+                messageDiv.innerHTML = '<span class="success">Inscription réussie ! Vos données ont été ajoutées au tableur.</span>';
+                form.reset();
+                selectedSlot = null;
+                renderAllSlots();
+                validate();
+            } catch (err) {
+                messageDiv.innerHTML = '<span class="error">Erreur lors de l\'enregistrement : ' + err.message + '</span>';
+            } finally {
+                submitBtn.innerText = 'S\'INSCRIRE';
+            }
+        };
+
+        // Rendu initial (au cas où on n'est pas dans Grist)
+        renderAllSlots();
+    </script>
+</body>
+</html>
