@@ -1,0 +1,5 @@
+{
+  "name": "Grist Registration App",
+  "description": "Système d'inscription avec gestion de créneaux et limites de participants.",
+  "requestFramePermissions": []
+}
