@@ -221,14 +221,22 @@
         // Initialisation de l'API Grist
         grist.ready({
             requiredAccess: 'full',
-            // On s'attend à ce que le tableur ait ces colonnes
-            columns: ['Prenom', 'Nom', 'Email', 'NbPersonnes', 'Creneau']
+            // Définition explicite des colonnes attendues par le widget
+            columns: [
+                { name: "Prenom", title: "Prénom", optional: false },
+                { name: "Nom", title: "Nom", optional: false },
+                { name: "Email", title: "Email", optional: false },
+                { name: "NbPersonnes", title: "NbPersonnes", optional: false },
+                { name: "Creneau", title: "Creneau", optional: false }
+            ]
         });
 
         // Écouter les changements dans le tableur Grist pour mettre à jour les disponibilités
-        grist.onRecords(function(records) {
+        grist.onRecords(function(records, mappings) {
+            console.log("Colonnes mappées par Grist :", mappings);
             slotTotals = {};
             records.forEach(r => {
+                // Utilisation du mapping pour lire les données même si les colonnes sont renommées
                 const slot = r.Creneau;
                 const count = parseInt(r.NbPersonnes) || 0;
                 if (slot) {
@@ -288,6 +296,7 @@
                 return;
             }
 
+            // Préparation de l'enregistrement
             const record = {
                 Prenom: document.getElementById('firstName').value,
                 Nom: document.getElementById('lastName').value,
@@ -296,62 +305,31 @@
                 Creneau: selectedSlot
             };
 
+            console.log("Tentative d'envoi du record :", record);
+
             try {
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
                 if (!window.grist) throw new Error("L'API Grist n'est pas chargée.");
 
-                // STRATÉGIE D'ENREGISTREMENT ROBUSTE
-                let success = false;
-
-                // 1. Tentative via selectedTable (méthode recommandée)
+                // Utilisation de la méthode la plus fiable avec mapping automatique
                 if (grist.selectedTable) {
-                    try {
-                        if (typeof grist.selectedTable.create === 'function') {
-                            await grist.selectedTable.create([record]);
-                            success = true;
-                        } else if (grist.selectedTable.tableId) {
-                            // Si create n'est pas une fonction, on utilise docApi avec l'ID stocké dans la propriété tableId
-                            await grist.docApi.addRecords(grist.selectedTable.tableId, [record]);
-                            success = true;
-                        }
-                    } catch (e) {
-                        console.warn("Échec de la méthode selectedTable, tentative alternative...", e);
-                    }
-                }
-
-                // 2. Tentative via getTableId (si la première méthode a échoué)
-                if (!success) {
-                    try {
-                        let tableId = null;
-                        if (typeof grist.getTableId === 'function') {
-                            tableId = await grist.getTableId();
-                        } else if (grist.docApi && typeof grist.docApi.getTableId === 'function') {
-                            tableId = await grist.docApi.getTableId();
-                        }
-
-                        if (tableId) {
-                            await grist.docApi.addRecords(tableId, [record]);
-                            success = true;
-                        }
-                    } catch (e) {
-                        console.warn("Échec de la méthode getTableId...", e);
-                    }
-                }
-
-                if (!success) {
-                    throw new Error("Impossible de trouver une méthode d'enregistrement compatible. Vérifiez que le widget est bien lié à une table dans le panneau 'Données' de Grist.");
+                    // create() utilise automatiquement le mapping défini dans grist.ready()
+                    await grist.selectedTable.create([record]);
+                } else {
+                    const tableId = await grist.getTableId();
+                    await grist.docApi.addRecords(tableId, [record]);
                 }
                 
-                messageDiv.innerHTML = '<span class="success">Inscription réussie ! Vos données ont été ajoutées au tableur.</span>';
+                messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
                 form.reset();
                 selectedSlot = null;
                 renderAllSlots();
                 validate();
             } catch (err) {
                 console.error("Grist Error Details:", err);
-                messageDiv.innerHTML = '<span class="error">Erreur technique : ' + (err.message || "Erreur de communication avec Grist") + '</span>';
+                messageDiv.innerHTML = '<span class="error">Erreur technique : ' + (err.message || "Erreur de communication") + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
