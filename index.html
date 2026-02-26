@@ -300,8 +300,14 @@
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                // Envoi vers Grist
-                await grist.selectedTable.createRecords([record]);
+                // Vérifier si le widget est lié à une table
+                const tableId = await grist.docApi.getTableId();
+                if (!tableId) {
+                    throw new Error("Le widget n'est pas lié à une table Grist. Veuillez sélectionner une table dans le panneau de configuration du widget.");
+                }
+
+                // Envoi vers Grist via l'API docApi (plus robuste)
+                await grist.docApi.addRecords(tableId, [record]);
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie ! Vos données ont été ajoutées au tableur.</span>';
                 form.reset();
@@ -309,7 +315,8 @@
                 renderAllSlots();
                 validate();
             } catch (err) {
-                messageDiv.innerHTML = '<span class="error">Erreur lors de l\'enregistrement : ' + err.message + '</span>';
+                console.error("Grist Error:", err);
+                messageDiv.innerHTML = '<span class="error">Erreur lors de l\'enregistrement : ' + (err.message || "Vérifiez la configuration du widget") + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
