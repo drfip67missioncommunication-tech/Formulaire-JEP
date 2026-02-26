@@ -219,26 +219,35 @@
         const messageDiv = document.getElementById('message');
 
         let currentMappings = null;
+        let detectedColumnIds = [];
 
-        // Initialisation de l'API Grist
+        // Initialisation de l'API Grist avec les noms exacts vus sur les captures d'écran
         grist.ready({
             requiredAccess: 'full',
             columns: [
-                { name: "Prenom", title: "Prénom" },
-                { name: "Nom", title: "Nom" },
-                { name: "Email", title: "Email" },
-                { name: "NbPersonnes", title: "NbPersonnes" },
-                { name: "Creneau", title: "Creneau" }
+                { name: "PRÉNOM", title: "Prénom" },
+                { name: "NOM", title: "Nom" },
+                { name: "EMAIL", title: "Email" },
+                { name: "NBPERSONNES", title: "Nombre de personnes" },
+                { name: "CRENEAU", title: "Créneau" }
             ]
         });
 
-        // Écouter les changements dans le tableur Grist
+        // Écouter les changements et récupérer le mapping
         grist.onRecords(function(records, mappings) {
-            currentMappings = mappings; // On sauvegarde la "traduction" des colonnes
+            currentMappings = mappings;
+            console.log("Mapping Grist reçu:", mappings);
+            
+            if (records && records.length > 0) {
+                detectedColumnIds = Object.keys(records[0]).filter(k => k !== 'id');
+                console.log("IDs de colonnes détectés dans les données:", detectedColumnIds);
+            }
+            
             slotTotals = {};
             records.forEach(r => {
-                const slot = r.Creneau;
-                const count = parseInt(r.NbPersonnes) || 0;
+                // On essaie de lire via le nom mappé ou via les IDs probables
+                const slot = r.CRENEAU || r.Creneau || r.E || r.e || r.creneau;
+                const count = parseInt(r.NBPERSONNES || r.NbPersonnes || r.D || r.d || r.nbpersonnes) || 0;
                 if (slot) {
                     slotTotals[slot] = (slotTotals[slot] || 0) + count;
                 }
@@ -285,14 +294,42 @@
             submitBtn.disabled = !selectedSlot;
         }
 
+        // Fonction utilitaire pour trouver l'ID de colonne réel
+        function getColId(name, index) {
+            const fallbacks = [
+                ['A', 'a', 'PRÉNOM', 'Prenom'],
+                ['B', 'b', 'NOM', 'Nom'],
+                ['C', 'c', 'EMAIL', 'Email'],
+                ['D', 'd', 'NBPERSONNES', 'NbPersonnes'],
+                ['E', 'e', 'CRENEAU', 'Creneau']
+            ];
+
+            // 1. Essayer le mapping officiel
+            if (currentMappings && currentMappings[name]) {
+                return currentMappings[name];
+            }
+
+            // 2. Essayer une correspondance insensible à la casse dans le mapping
+            if (currentMappings) {
+                for (const mKey in currentMappings) {
+                    if (mKey.toUpperCase() === name.toUpperCase() && currentMappings[mKey]) {
+                        return currentMappings[mKey];
+                    }
+                }
+            }
+
+            // 3. Si on a détecté des IDs dans les records, on peut essayer de deviner par l'index
+            if (detectedColumnIds && detectedColumnIds[index]) {
+                return detectedColumnIds[index];
+            }
+
+            // 4. Fallback ultime sur les IDs standards Grist (A, B, C...)
+            return fallbacks[index][0]; 
+        }
+
         form.onsubmit = async (e) => {
             e.preventDefault();
             
-            if (!currentMappings) {
-                messageDiv.innerHTML = '<span class="error">Erreur : Le mapping des colonnes n\'est pas prêt.</span>';
-                return;
-            }
-
             const peopleCount = parseInt(document.getElementById('peopleCount').value);
             const currentTotal = slotTotals[selectedSlot] || 0;
             
@@ -301,31 +338,45 @@
                 return;
             }
 
-            // DONNÉES BRUTES
-            const rawData = {
-                Prenom: document.getElementById('firstName').value,
-                Nom: document.getElementById('lastName').value,
-                Email: document.getElementById('email').value,
-                NbPersonnes: peopleCount,
-                Creneau: selectedSlot
-            };
-
-            // TRADUCTION : On transforme les noms (Prenom, Nom...) en IDs réels (a, b, c...)
-            const mappedRecord = {};
-            for (const key in rawData) {
-                const realColId = currentMappings[key];
-                if (realColId) {
-                    mappedRecord[realColId] = rawData[key];
-                }
-            }
-
             try {
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                // On utilise l'ID de la table et addRecords pour une précision maximale
+                const firstName = document.getElementById('firstName').value;
+                const lastName = document.getElementById('lastName').value;
+                const email = document.getElementById('email').value;
+
+                // Construction du record avec les IDs de colonnes résolus
+                const record = {};
+                record[getColId("PRÉNOM", 0)] = firstName;
+                record[getColId("NOM", 1)] = lastName;
+                record[getColId("EMAIL", 2)] = email;
+                record[getColId("NBPERSONNES", 3)] = peopleCount;
+                record[getColId("CRENEAU", 4)] = selectedSlot;
+
+                console.log("Tentative d'envoi du record:", record);
+
                 const tableId = await grist.getTableId();
-                await grist.docApi.addRecords(tableId, [mappedRecord]);
+                
+                // On essaie d'abord via selectedTable si disponible
+                if (grist.selectedTable && typeof grist.selectedTable.createRecords === 'function') {
+                    try {
+                        // Pour selectedTable, on peut parfois envoyer les noms mappés directement
+                        const mappedForSelected = {
+                            "PRÉNOM": firstName,
+                            "NOM": lastName,
+                            "EMAIL": email,
+                            "NBPERSONNES": peopleCount,
+                            "CRENEAU": selectedSlot
+                        };
+                        await grist.selectedTable.createRecords([mappedForSelected]);
+                    } catch (e) {
+                        console.warn("Echec selectedTable, repli sur docApi:", e);
+                        await grist.docApi.addRecords(tableId, [record]);
+                    }
+                } else {
+                    await grist.docApi.addRecords(tableId, [record]);
+                }
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
                 form.reset();
@@ -333,8 +384,8 @@
                 renderAllSlots();
                 validate();
             } catch (err) {
-                console.error("Grist Error Details:", err);
-                messageDiv.innerHTML = '<span class="error">Erreur : ' + (err.message || "Problème de communication") + '</span>';
+                console.error("Erreur Grist détaillée:", err);
+                messageDiv.innerHTML = '<span class="error">Erreur : ' + (err.message || "Problème d'écriture") + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
