@@ -300,13 +300,16 @@
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                // Vérifier si le widget est lié à une table
-                const tableId = await grist.docApi.getTableId();
-                if (!tableId) {
-                    throw new Error("Le widget n'est pas lié à une table Grist. Veuillez sélectionner une table dans le panneau de configuration du widget.");
+                // Vérifier si le widget est prêt et lié
+                if (!grist.selectedTable) {
+                    throw new Error("Le widget n'est pas encore prêt ou n'est pas lié à une table. Vérifiez les paramètres du widget.");
                 }
 
-                // Envoi vers Grist via l'API docApi (plus robuste)
+                // La méthode correcte est .create() et non .createRecords()
+                // On peut utiliser grist.selectedTable.create([record]) 
+                // ou grist.docApi.addRecords(tableId, [record])
+                
+                const tableId = await grist.getTableId();
                 await grist.docApi.addRecords(tableId, [record]);
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie ! Vos données ont été ajoutées au tableur.</span>';
@@ -316,7 +319,11 @@
                 validate();
             } catch (err) {
                 console.error("Grist Error:", err);
-                messageDiv.innerHTML = '<span class="error">Erreur lors de l\'enregistrement : ' + (err.message || "Vérifiez la configuration du widget") + '</span>';
+                let errorMsg = err.message || "Erreur inconnue";
+                if (errorMsg.includes("not a function")) {
+                    errorMsg = "Erreur de communication avec Grist. Assurez-vous d'être bien dans l'interface Grist.";
+                }
+                messageDiv.innerHTML = '<span class="error">Erreur : ' + errorMsg + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
