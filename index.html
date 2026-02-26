@@ -300,17 +300,15 @@
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                // Vérifier si le widget est prêt et lié
-                if (!grist.selectedTable) {
-                    throw new Error("Le widget n'est pas encore prêt ou n'est pas lié à une table. Vérifiez les paramètres du widget.");
+                // Méthode la plus directe et standard pour les widgets Grist
+                // Elle utilise la table sélectionnée dans le panneau "Data"
+                if (grist.selectedTable && typeof grist.selectedTable.create === 'function') {
+                    await grist.selectedTable.create([record]);
+                } else {
+                    // Alternative si selectedTable n'est pas disponible
+                    const tableId = await grist.getTableId();
+                    await grist.docApi.addRecords(tableId, [record]);
                 }
-
-                // La méthode correcte est .create() et non .createRecords()
-                // On peut utiliser grist.selectedTable.create([record]) 
-                // ou grist.docApi.addRecords(tableId, [record])
-                
-                const tableId = await grist.getTableId();
-                await grist.docApi.addRecords(tableId, [record]);
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie ! Vos données ont été ajoutées au tableur.</span>';
                 form.reset();
@@ -318,12 +316,8 @@
                 renderAllSlots();
                 validate();
             } catch (err) {
-                console.error("Grist Error:", err);
-                let errorMsg = err.message || "Erreur inconnue";
-                if (errorMsg.includes("not a function")) {
-                    errorMsg = "Erreur de communication avec Grist. Assurez-vous d'être bien dans l'interface Grist.";
-                }
-                messageDiv.innerHTML = '<span class="error">Erreur : ' + errorMsg + '</span>';
+                console.error("Grist Error Details:", err);
+                messageDiv.innerHTML = '<span class="error">Erreur technique : ' + (err.message || "Erreur inconnue") + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
