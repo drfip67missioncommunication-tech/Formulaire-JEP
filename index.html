@@ -297,14 +297,14 @@
         // Fonction utilitaire pour trouver l'ID de colonne réel
         function getColId(name, index) {
             const fallbacks = [
-                ['A', 'a', 'PRÉNOM', 'Prenom'],
+                ['A', 'a', 'PRÉNOM', 'Prenom', 'PRENOM'],
                 ['B', 'b', 'NOM', 'Nom'],
                 ['C', 'c', 'EMAIL', 'Email'],
-                ['D', 'd', 'NBPERSONNES', 'NbPersonnes'],
-                ['E', 'e', 'CRENEAU', 'Creneau']
+                ['D', 'd', 'NBPERSONNES', 'NbPersonnes', 'NB_PERSONNES'],
+                ['E', 'e', 'CRENEAU', 'Creneau', 'CRÉNEAU']
             ];
 
-            // 1. Essayer le mapping officiel
+            // 1. Essayer le mapping officiel (si l'utilisateur a configuré le widget)
             if (currentMappings && currentMappings[name]) {
                 return currentMappings[name];
             }
@@ -318,8 +318,8 @@
                 }
             }
 
-            // 3. Si on a détecté des IDs dans les records, on peut essayer de deviner par l'index
-            if (detectedColumnIds && detectedColumnIds[index]) {
+            // 3. Si on a détecté des IDs dans les records existants, on les utilise par index
+            if (detectedColumnIds && detectedColumnIds.length > index) {
                 return detectedColumnIds[index];
             }
 
@@ -346,48 +346,49 @@
                 const lastName = document.getElementById('lastName').value;
                 const email = document.getElementById('email').value;
 
-                // 1. Préparation du record mappé (pour docApi)
-                const mappedRecord = {};
-                mappedRecord[getColId("PRÉNOM", 0)] = firstName;
-                mappedRecord[getColId("NOM", 1)] = lastName;
-                mappedRecord[getColId("EMAIL", 2)] = email;
-                mappedRecord[getColId("NBPERSONNES", 3)] = peopleCount;
-                mappedRecord[getColId("CRENEAU", 4)] = selectedSlot;
+                // Construction d'un record ultra-redondant pour maximiser les chances de succès
+                // On envoie à la fois les IDs probables (A, B, C) et les noms de colonnes
+                const record = {};
+                
+                // On ajoute les valeurs avec les IDs de colonnes devinés (A, B, C...)
+                record[getColId("PRÉNOM", 0)] = firstName;
+                record[getColId("NOM", 1)] = lastName;
+                record[getColId("EMAIL", 2)] = email;
+                record[getColId("NBPERSONNES", 3)] = peopleCount;
+                record[getColId("CRENEAU", 4)] = selectedSlot;
 
-                // 2. Préparation du record avec noms de labels (pour selectedTable.create)
-                const labelRecord = {
-                    "PRÉNOM": firstName,
-                    "NOM": lastName,
-                    "EMAIL": email,
-                    "NBPERSONNES": peopleCount,
-                    "CRENEAU": selectedSlot
-                };
+                // On ajoute aussi les noms en dur au cas où Grist les accepterait directement
+                record["PRÉNOM"] = firstName;
+                record["NOM"] = lastName;
+                record["EMAIL"] = email;
+                record["NBPERSONNES"] = peopleCount;
+                record["CRENEAU"] = selectedSlot;
+                
+                // Et des variantes sans accents
+                record["PRENOM"] = firstName;
+                record["NbPersonnes"] = peopleCount;
+                record["Creneau"] = selectedSlot;
 
-                console.log("Tentative d'enregistrement...", { mappedRecord, labelRecord });
+                console.log("Tentative d'enregistrement avec record:", record);
 
-                // STRATÉGIE D'ENREGISTREMENT
-                if (grist.selectedTable && typeof grist.selectedTable.create === 'function') {
-                    // Méthode la plus standard
-                    await grist.selectedTable.create([labelRecord]);
-                } else if (grist.selectedTable && typeof grist.selectedTable.createRecords === 'function') {
-                    // Variante de nom de fonction
-                    await grist.selectedTable.createRecords([labelRecord]);
+                // On récupère l'ID de la table
+                let tableId = null;
+                if (grist.selectedTable && grist.selectedTable.tableId) {
+                    tableId = grist.selectedTable.tableId;
+                } else if (typeof grist.getTableId === 'function') {
+                    tableId = await grist.getTableId();
+                } else if (grist.docApi && typeof grist.docApi.getTableId === 'function') {
+                    tableId = await grist.docApi.getTableId();
+                }
+
+                if (tableId) {
+                    // On utilise docApi.addRecords qui est plus direct avec les IDs de colonnes
+                    await grist.docApi.addRecords(tableId, [record]);
+                } else if (grist.selectedTable && typeof grist.selectedTable.create === 'function') {
+                    // Fallback sur selectedTable.create si on n'a pas pu avoir le tableId
+                    await grist.selectedTable.create([record]);
                 } else {
-                    // Fallback sur docApi
-                    let tableId = null;
-                    if (grist.selectedTable && grist.selectedTable.tableId) {
-                        tableId = grist.selectedTable.tableId;
-                    } else if (typeof grist.getTableId === 'function') {
-                        tableId = await grist.getTableId();
-                    } else if (grist.docApi && typeof grist.docApi.getTableId === 'function') {
-                        tableId = await grist.docApi.getTableId();
-                    }
-
-                    if (tableId) {
-                        await grist.docApi.addRecords(tableId, [mappedRecord]);
-                    } else {
-                        throw new Error("Impossible de déterminer l'ID de la table. Vérifiez que le widget est lié à une table.");
-                    }
+                    throw new Error("Impossible de communiquer avec Grist (ID de table introuvable).");
                 }
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
