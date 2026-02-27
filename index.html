@@ -221,7 +221,7 @@
         let currentMappings = null;
         let detectedColumnIds = [];
 
-        // Initialisation de l'API Grist avec les noms exacts vus sur les captures d'écran
+        // Initialisation de l'API Grist
         grist.ready({
             requiredAccess: 'full',
             columns: [
@@ -233,21 +233,22 @@
             ]
         });
 
-        // Écouter les changements et récupérer le mapping
+        // Écouter les changements
         grist.onRecords(function(records, mappings) {
             currentMappings = mappings;
-            console.log("Mapping Grist reçu:", mappings);
+            console.log("Mapping Grist:", mappings);
             
             if (records && records.length > 0) {
+                // On extrait tous les IDs de colonnes présents dans le premier enregistrement
                 detectedColumnIds = Object.keys(records[0]).filter(k => k !== 'id');
-                console.log("IDs de colonnes détectés dans les données:", detectedColumnIds);
+                console.log("Colonnes détectées:", detectedColumnIds);
             }
             
             slotTotals = {};
             records.forEach(r => {
-                // On essaie de lire via le nom mappé ou via les IDs probables
-                const slot = r.CRENEAU || r.Creneau || r.E || r.e || r.creneau;
-                const count = parseInt(r.NBPERSONNES || r.NbPersonnes || r.D || r.d || r.nbpersonnes) || 0;
+                // Lecture ultra-flexible pour le comptage des places
+                const slot = r.CRENEAU || r.Creneau || r.E || r.e || r.creneau || r.CRÉNEAU;
+                const count = parseInt(r.NBPERSONNES || r.NbPersonnes || r.D || r.d || r.nbpersonnes || r.NB_PERSONNES) || 0;
                 if (slot) {
                     slotTotals[slot] = (slotTotals[slot] || 0) + count;
                 }
@@ -294,39 +295,6 @@
             submitBtn.disabled = !selectedSlot;
         }
 
-        // Fonction utilitaire pour trouver l'ID de colonne réel
-        function getColId(name, index) {
-            const fallbacks = [
-                ['A', 'a', 'PRÉNOM', 'Prenom', 'PRENOM'],
-                ['B', 'b', 'NOM', 'Nom'],
-                ['C', 'c', 'EMAIL', 'Email'],
-                ['D', 'd', 'NBPERSONNES', 'NbPersonnes', 'NB_PERSONNES'],
-                ['E', 'e', 'CRENEAU', 'Creneau', 'CRÉNEAU']
-            ];
-
-            // 1. Essayer le mapping officiel (si l'utilisateur a configuré le widget)
-            if (currentMappings && currentMappings[name]) {
-                return currentMappings[name];
-            }
-
-            // 2. Essayer une correspondance insensible à la casse dans le mapping
-            if (currentMappings) {
-                for (const mKey in currentMappings) {
-                    if (mKey.toUpperCase() === name.toUpperCase() && currentMappings[mKey]) {
-                        return currentMappings[mKey];
-                    }
-                }
-            }
-
-            // 3. Si on a détecté des IDs dans les records existants, on les utilise par index
-            if (detectedColumnIds && detectedColumnIds.length > index) {
-                return detectedColumnIds[index];
-            }
-
-            // 4. Fallback ultime sur les IDs standards Grist (A, B, C...)
-            return fallbacks[index][0]; 
-        }
-
         form.onsubmit = async (e) => {
             e.preventDefault();
             
@@ -346,49 +314,53 @@
                 const lastName = document.getElementById('lastName').value;
                 const email = document.getElementById('email').value;
 
-                // Construction d'un record ultra-redondant pour maximiser les chances de succès
-                // On envoie à la fois les IDs probables (A, B, C) et les noms de colonnes
+                // CRÉATION DU RECORD - STRATÉGIE "FORCE BRUTE"
+                // On crée un objet qui contient TOUTES les clés possibles.
+                // Grist ignorera celles qui ne correspondent pas à une colonne.
                 const record = {};
                 
-                // On ajoute les valeurs avec les IDs de colonnes devinés (A, B, C...)
-                record[getColId("PRÉNOM", 0)] = firstName;
-                record[getColId("NOM", 1)] = lastName;
-                record[getColId("EMAIL", 2)] = email;
-                record[getColId("NBPERSONNES", 3)] = peopleCount;
-                record[getColId("CRENEAU", 4)] = selectedSlot;
-
-                // On ajoute aussi les noms en dur au cas où Grist les accepterait directement
-                record["PRÉNOM"] = firstName;
-                record["NOM"] = lastName;
-                record["EMAIL"] = email;
-                record["NBPERSONNES"] = peopleCount;
-                record["CRENEAU"] = selectedSlot;
+                // 1. On essaie les IDs physiques standards (A, B, C, D, E) en majuscules ET minuscules
+                const physicalIds = ['A', 'B', 'C', 'D', 'E'];
+                const values = [firstName, lastName, email, peopleCount, selectedSlot];
                 
-                // Et des variantes sans accents
-                record["PRENOM"] = firstName;
+                physicalIds.forEach((id, i) => {
+                    record[id] = values[i];            // ex: record["A"] = "Jean"
+                    record[id.toLowerCase()] = values[i]; // ex: record["a"] = "Jean"
+                });
+
+                // 2. On ajoute les noms de colonnes configurés dans le mapping (si l'utilisateur a lié les colonnes)
+                const configNames = ["PRÉNOM", "NOM", "EMAIL", "NBPERSONNES", "CRENEAU"];
+                configNames.forEach((name, i) => {
+                    if (currentMappings && currentMappings[name]) {
+                        record[currentMappings[name]] = values[i];
+                    }
+                    // On ajoute aussi le nom brut au cas où
+                    record[name] = values[i];
+                });
+
+                // 3. On ajoute les libellés exacts vus sur la capture d'écran
+                record["Prenom"] = firstName;
+                record["Nom"] = lastName;
+                record["Email"] = email;
                 record["NbPersonnes"] = peopleCount;
                 record["Creneau"] = selectedSlot;
 
-                console.log("Tentative d'enregistrement avec record:", record);
+                console.log("Envoi du record à Grist:", record);
 
-                // On récupère l'ID de la table
+                // Récupération de l'ID de la table
                 let tableId = null;
-                if (grist.selectedTable && grist.selectedTable.tableId) {
-                    tableId = grist.selectedTable.tableId;
-                } else if (typeof grist.getTableId === 'function') {
+                try {
                     tableId = await grist.getTableId();
-                } else if (grist.docApi && typeof grist.docApi.getTableId === 'function') {
-                    tableId = await grist.docApi.getTableId();
+                } catch(e) {
+                    if (grist.selectedTable) tableId = grist.selectedTable.tableId;
                 }
 
                 if (tableId) {
-                    // On utilise docApi.addRecords qui est plus direct avec les IDs de colonnes
+                    // addRecords est la méthode la plus fiable pour les IDs de colonnes
                     await grist.docApi.addRecords(tableId, [record]);
-                } else if (grist.selectedTable && typeof grist.selectedTable.create === 'function') {
-                    // Fallback sur selectedTable.create si on n'a pas pu avoir le tableId
-                    await grist.selectedTable.create([record]);
                 } else {
-                    throw new Error("Impossible de communiquer avec Grist (ID de table introuvable).");
+                    // Fallback ultime
+                    await grist.selectedTable.create([record]);
                 }
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
