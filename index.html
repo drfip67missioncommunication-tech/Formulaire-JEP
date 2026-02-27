@@ -3,9 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inscription Grist</title>
-    <!-- Grist Plugin API pour l'intégration avec le tableur -->
-    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <title>Inscription Événement</title>
     <style>
         :root {
             --primary: #5A5A40;
@@ -169,6 +167,18 @@
 
         .success { color: #059669; }
         .error { color: var(--error); }
+
+        .csv-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+            text-decoration: none;
+        }
+        .csv-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -203,6 +213,7 @@
             <button type="submit" id="submitBtn" disabled>S'INSCRIRE</button>
         </form>
         <div id="message"></div>
+        <a href="/api/download-csv" class="csv-link" target="_blank">Télécharger la liste (CSV)</a>
     </div>
 
     <script>
@@ -210,7 +221,7 @@
         const afternoonTimes = ["14:00", "14:15", "14:30", "14:45", "15:00", "15:15", "15:30", "15:45", "16:00"];
         
         let selectedSlot = null;
-        let slotTotals = {}; // Stocke le total de personnes par créneau
+        let slotTotals = {};
 
         const morningContainer = document.getElementById('morningSlots');
         const afternoonContainer = document.getElementById('afternoonSlots');
@@ -218,43 +229,26 @@
         const form = document.getElementById('regForm');
         const messageDiv = document.getElementById('message');
 
-        let currentMappings = null;
-        let detectedColumnIds = [];
-
-        // Initialisation de l'API Grist
-        grist.ready({
-            requiredAccess: 'full',
-            columns: [
-                { name: "PRÉNOM", title: "Prénom" },
-                { name: "NOM", title: "Nom" },
-                { name: "EMAIL", title: "Email" },
-                { name: "NBPERSONNES", title: "Nombre de personnes" },
-                { name: "CRENEAU", title: "Créneau" }
-            ]
-        });
-
-        // Écouter les changements
-        grist.onRecords(function(records, mappings) {
-            currentMappings = mappings;
-            console.log("Mapping Grist:", mappings);
-            
-            if (records && records.length > 0) {
-                // On extrait tous les IDs de colonnes présents dans le premier enregistrement
-                detectedColumnIds = Object.keys(records[0]).filter(k => k !== 'id');
-                console.log("Colonnes détectées:", detectedColumnIds);
+        async function loadInscriptions() {
+            try {
+                const response = await fetch('/api/inscriptions');
+                if (!response.ok) throw new Error('Erreur réseau');
+                const records = await response.json();
+                
+                slotTotals = {};
+                records.forEach(r => {
+                    const s = r.Créneau;
+                    const c = parseInt(r.NbPersonnes) || 0;
+                    if (s) {
+                        slotTotals[s] = (slotTotals[s] || 0) + c;
+                    }
+                });
+                renderAllSlots();
+            } catch (error) {
+                console.error("Erreur chargement:", error);
+                messageDiv.innerHTML = '<span class="error">Erreur de connexion au serveur.</span>';
             }
-            
-            slotTotals = {};
-            records.forEach(r => {
-                // Lecture ultra-flexible pour le comptage des places
-                const slot = r.CRENEAU || r.Creneau || r.E || r.e || r.creneau || r.CRÉNEAU;
-                const count = parseInt(r.NBPERSONNES || r.NbPersonnes || r.D || r.d || r.nbpersonnes || r.NB_PERSONNES) || 0;
-                if (slot) {
-                    slotTotals[slot] = (slotTotals[slot] || 0) + count;
-                }
-            });
-            renderAllSlots();
-        });
+        }
 
         function renderAllSlots() {
             renderSlotGroup(morningTimes, morningContainer);
@@ -310,74 +304,39 @@
                 submitBtn.disabled = true;
                 submitBtn.innerText = 'ENREGISTREMENT...';
                 
-                const firstName = document.getElementById('firstName').value;
-                const lastName = document.getElementById('lastName').value;
-                const email = document.getElementById('email').value;
+                const data = {
+                    firstName: document.getElementById('firstName').value,
+                    lastName: document.getElementById('lastName').value,
+                    email: document.getElementById('email').value,
+                    peopleCount: peopleCount,
+                    slot: selectedSlot
+                };
 
-                // CRÉATION DU RECORD - STRATÉGIE "FORCE BRUTE"
-                // On crée un objet qui contient TOUTES les clés possibles.
-                // Grist ignorera celles qui ne correspondent pas à une colonne.
-                const record = {};
-                
-                // 1. On essaie les IDs physiques standards (A, B, C, D, E) en majuscules ET minuscules
-                const physicalIds = ['A', 'B', 'C', 'D', 'E'];
-                const values = [firstName, lastName, email, peopleCount, selectedSlot];
-                
-                physicalIds.forEach((id, i) => {
-                    record[id] = values[i];            // ex: record["A"] = "Jean"
-                    record[id.toLowerCase()] = values[i]; // ex: record["a"] = "Jean"
+                const response = await fetch('/api/inscriptions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
                 });
 
-                // 2. On ajoute les noms de colonnes configurés dans le mapping (si l'utilisateur a lié les colonnes)
-                const configNames = ["PRÉNOM", "NOM", "EMAIL", "NBPERSONNES", "CRENEAU"];
-                configNames.forEach((name, i) => {
-                    if (currentMappings && currentMappings[name]) {
-                        record[currentMappings[name]] = values[i];
-                    }
-                    // On ajoute aussi le nom brut au cas où
-                    record[name] = values[i];
-                });
-
-                // 3. On ajoute les libellés exacts vus sur la capture d'écran
-                record["Prenom"] = firstName;
-                record["Nom"] = lastName;
-                record["Email"] = email;
-                record["NbPersonnes"] = peopleCount;
-                record["Creneau"] = selectedSlot;
-
-                console.log("Envoi du record à Grist:", record);
-
-                // Récupération de l'ID de la table
-                let tableId = null;
-                try {
-                    tableId = await grist.getTableId();
-                } catch(e) {
-                    if (grist.selectedTable) tableId = grist.selectedTable.tableId;
-                }
-
-                if (tableId) {
-                    // addRecords est la méthode la plus fiable pour les IDs de colonnes
-                    await grist.docApi.addRecords(tableId, [record]);
-                } else {
-                    // Fallback ultime
-                    await grist.selectedTable.create([record]);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || "Erreur lors de l'enregistrement");
                 }
                 
                 messageDiv.innerHTML = '<span class="success">Inscription réussie !</span>';
                 form.reset();
                 selectedSlot = null;
-                renderAllSlots();
+                await loadInscriptions();
                 validate();
             } catch (err) {
-                console.error("Erreur Grist détaillée:", err);
-                messageDiv.innerHTML = '<span class="error">Erreur : ' + (err.message || "Problème d'écriture") + '</span>';
+                console.error("Erreur:", err);
+                messageDiv.innerHTML = '<span class="error">Erreur : ' + err.message + '</span>';
             } finally {
                 submitBtn.innerText = 'S\'INSCRIRE';
             }
         };
 
-        // Rendu initial (au cas où on n'est pas dans Grist)
-        renderAllSlots();
+        loadInscriptions();
     </script>
 </body>
 </html>

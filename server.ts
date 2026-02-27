@@ -1,93 +1,101 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+import { parse } from "csv-parse/sync";
+import { stringify } from "csv-stringify/sync";
+import cors from "cors";
 
-const db = new Database("registrations.db");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Initialize database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS registrations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    firstName TEXT NOT NULL,
-    lastName TEXT NOT NULL,
-    email TEXT NOT NULL,
-    peopleCount INTEGER NOT NULL,
-    slot TEXT NOT NULL,
-    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
+const CSV_FILE = path.join(__dirname, "inscriptions.csv");
+
+// Initialiser le CSV s'il n'existe pas
+if (!fs.existsSync(CSV_FILE)) {
+    const headers = [["Prénom", "Nom", "Email", "NbPersonnes", "Créneau", "DateInscription"]];
+    fs.writeFileSync(CSV_FILE, stringify(headers));
+}
 
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
+    const app = express();
+    const PORT = 3000;
 
-  app.use(express.json());
+    app.use(cors());
+    app.use(express.json());
 
-  // API Routes
-  app.get("/api/slots", (req, res) => {
-    try {
-      const rows = db.prepare(`
-        SELECT slot, SUM(peopleCount) as totalParticipants
-        FROM registrations
-        GROUP BY slot
-      `).all() as { slot: string; totalParticipants: number }[];
-      
-      res.json(rows);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Failed to fetch slots" });
-    }
-  });
-
-  app.post("/api/register", (req, res) => {
-    const { firstName, lastName, email, peopleCount, slot } = req.body;
-
-    if (!firstName || !lastName || !email || !peopleCount || !slot) {
-      return res.status(400).json({ error: "Tous les champs sont obligatoires" });
-    }
-
-    try {
-      // Check capacity
-      const current = db.prepare(`
-        SELECT SUM(peopleCount) as total FROM registrations WHERE slot = ?
-      `).get(slot) as { total: number | null };
-      
-      const currentTotal = current?.total || 0;
-      if (currentTotal + parseInt(peopleCount) > 15) {
-        return res.status(400).json({ error: "Ce créneau est complet ou n'a plus assez de places" });
-      }
-
-      const stmt = db.prepare(`
-        INSERT INTO registrations (firstName, lastName, email, peopleCount, slot)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(firstName, lastName, email, peopleCount, slot);
-      
-      res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Erreur lors de l'enregistrement" });
-    }
-  });
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    // API: Récupérer toutes les inscriptions
+    app.get("/api/inscriptions", (req, res) => {
+        try {
+            const fileContent = fs.readFileSync(CSV_FILE, "utf-8");
+            const records = parse(fileContent, {
+                columns: true,
+                skip_empty_lines: true,
+            });
+            res.json(records);
+        } catch (error) {
+            console.error("Erreur lecture CSV:", error);
+            res.status(500).json({ error: "Erreur lors de la lecture des données" });
+        }
     });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(process.cwd(), "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(process.cwd(), "dist", "index.html"));
-    });
-  }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+    // API: Ajouter une inscription
+    app.post("/api/inscriptions", (req, res) => {
+        try {
+            const { firstName, lastName, email, peopleCount, slot } = req.body;
+
+            if (!firstName || !lastName || !email || !peopleCount || !slot) {
+                return res.status(400).json({ error: "Tous les champs sont obligatoires" });
+            }
+
+            // Vérifier la capacité (optionnel car déjà fait côté client, mais plus sûr ici)
+            const fileContent = fs.readFileSync(CSV_FILE, "utf-8");
+            const records = parse(fileContent, { columns: true });
+            const currentTotal: number = records
+                .filter((r: any) => r.Créneau === slot)
+                .reduce((sum: number, r: any) => sum + (parseInt(r.NbPersonnes) || 0), 0) as number;
+
+            if (currentTotal + parseInt(peopleCount) > 15) {
+                return res.status(400).json({ error: "Désolé, ce créneau est désormais complet." });
+            }
+
+            const newRecord = [
+                firstName,
+                lastName,
+                email,
+                peopleCount,
+                slot,
+                new Date().toLocaleString("fr-FR")
+            ];
+
+            fs.appendFileSync(CSV_FILE, stringify([newRecord]));
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Erreur écriture CSV:", error);
+            res.status(500).json({ error: "Erreur lors de l'enregistrement" });
+        }
+    });
+
+    // API: Télécharger le CSV
+    app.get("/api/download-csv", (req, res) => {
+        res.download(CSV_FILE, "inscriptions.csv");
+    });
+
+    // Vite middleware pour le développement
+    if (process.env.NODE_ENV !== "production") {
+        const vite = await createViteServer({
+            server: { middlewareMode: true },
+            appType: "spa",
+        });
+        app.use(vite.middlewares);
+    } else {
+        app.use(express.static(path.join(__dirname, "dist")));
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Serveur démarré sur http://localhost:${PORT}`);
+    });
 }
 
 startServer();
